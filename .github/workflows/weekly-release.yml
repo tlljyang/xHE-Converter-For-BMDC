@@ -106,7 +106,7 @@ jobs:
         with:
           msystem: MINGW64
           update: false
-          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-gcc-g++ mingw-w64-x86_64-cmake make git
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake make git
 
       - name: Build xaacdec (Windows, run)
         if: runner.os == 'Windows'
