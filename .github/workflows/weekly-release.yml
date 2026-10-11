@@ -94,9 +94,7 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          cp -r deps/libxaac-src native/xaacdec/src/libxaac 2>/dev/null || true
-          LIBXAAC_REF=none bash native/xaacdec/build.sh || {
-            rm -rf native/xaacdec/src && bash native/xaacdec/build.sh; }
+          bash native/xaacdec/build.sh
           mkdir -p stage-bin
           cp native/xaacdec/out/bin/xaacdec stage-bin/
 
@@ -112,9 +110,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: |
-          cp -r deps/libxaac-src native/xaacdec/src/libxaac 2>/dev/null || true
-          LIBXAAC_REF=none bash native/xaacdec/build.sh || {
-            rm -rf native/xaacdec/src && bash native/xaacdec/build.sh; }
+          bash native/xaacdec/build.sh
           mkdir -p stage-bin
           cp native/xaacdec/out/bin/xaacdec.exe stage-bin/
 
@@ -145,7 +141,7 @@ jobs:
             cp -R dist-app/xHE4BMDC/* lite/xHE4BMDC/
           fi
           python -c "from xhe4bmdc import deps; from pathlib import Path; deps.write_example_yaml(Path('lite/dependencies-example.yaml'))"
-          cd lite && zip -rq "../xHE4BMDC-Lite-${{ matrix.platform }}.zip" . && cd ..
+          python -c "import shutil; shutil.make_archive('xHE4BMDC-Lite-${{ matrix.platform }}', 'zip', root_dir='lite')"
 
       - name: Assemble Onekey installer (Windows)
         if: runner.os == 'Windows'
