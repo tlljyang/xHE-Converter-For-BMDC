@@ -7,7 +7,7 @@
 #   LIBXAAC_REF      commit-ish to build (default: pinned below)
 set -euo pipefail
 
-LIBXAAC_REF="${LIBXAAC_REF:-55de89d2d004016292d1fcb4b42904ad3f5b54a82}"  # libxaac v0.1.12
+LIBXAAC_REF="${LIBXAAC_REF:-55de89d2d004016292d1fc4b42904ad3f5b54a82}"  # libxaac v0.1.12
 BASE="$(cd "$(dirname "$0")" && pwd)"
 SRC="$BASE/src"
 OUT="$BASE/out"

@@ -3,7 +3,7 @@
 AOSP **libxaac** 的 `xaacdec` 测试解码器构建（xHE-AAC / USAC 解码核心）。
 
 - 上游: https://android.googlesource.com/platform/external/libxaac (Apache-2.0)
-- 固定版本: `55de89d2d004016292d1fcb4b42904ad3f5b54a82` (v0.1.12)
+- 固定版本: `55de89d2d004016292d1fc4b42904ad3f5b54a82` (v0.1.12)
 - 本地参考构建 (Windows x64, MinGW 交叉编译) SHA-256:
   `de24fd5833ccdc10a310104329de15f0eba3f16c87891c43f079c1208bad5ef6`
 

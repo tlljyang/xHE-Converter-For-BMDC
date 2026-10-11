@@ -100,7 +100,7 @@ def resolve_macos(outdir: Path | None, arch: str) -> dict:
 
 # ---------------------------------------------------------------- libxaac
 
-LIBXAAC_REF = "55de89d2d004016292d1fcb4b42904ad3f5b54a82"  # v0.1.12 (pinned)
+LIBXAAC_REF = "55de89d2d004016292d1fc4b42904ad3f5b54a82"  # v0.1.12 (pinned)
 
 
 def resolve_libxaac(outdir: Path | None) -> dict:
