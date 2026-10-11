@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist-app/
+*.spec.bak
+
+# Local runtimes & deps
+.venv*/
+node_modules/
+
+# Keep committed dist/ layout out; CI artifacts land elsewhere
+dist/
+program/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# App data
+*.db
+*.db-wal
+*.db-shm
+logs/
+
+# native binaries (CI builds these)
+bin/
+
+# dev scratch
+.dev-*
