@@ -61,32 +61,40 @@ def resolve_windows(outdir: Path | None) -> dict:
 
 # ---------------------------------------------------------------- macOS
 
+_STABLE_RE = re.compile(r"ffmpeg-(\d+)\.(\d+)\.(\d+)\.zip")
+
+
 def resolve_macos(outdir: Path | None, arch: str) -> dict:
-    """evermeet.cx publishes versioned static ffmpeg/ffprobe for x64 and arm64."""
-    page = http_get("https://evermeet.cx/ffmpeg/", as_text=True)
-    links = re.findall(r'href="(https://evermeet\.cx/pub/ffmpeg/ffmpeg-[^"]+\.zip)"', page)
-    if not links:
-        raise RuntimeError("evermeet.cx 页面解析失败")
-    ffmpeg_url = links[0] if arch == "x64" else next(
-        (u for u in links if "arm64" in u), links[0])
-    info = {"ffmpeg_url": ffmpeg_url, "arch": arch}
-    m = re.search(r"ffmpeg-(\d+\.\d+\.\d+)", ffmpeg_url)
-    info["ffmpeg_version"] = m.group(1) if m else "unknown"
+    """macOS x64: evermeet.cx versioned zips (relative hrefs).
+    macOS arm64: osxexperts.net static zips (ffmpeg<N>arm.zip / ffprobe<N>arm.zip)."""
+    if arch == "x64":
+        page = http_get("https://evermeet.cx/ffmpeg/", as_text=True)
+        hrefs = re.findall(r'href="(ffmpeg-(?:\d+\.)+\d+\.zip)"', page)
+        if not hrefs:
+            raise RuntimeError("evermeet.cx 页面解析失败")
+        ver = max(hrefs, key=lambda h: tuple(int(x) for x in _STABLE_RE.match(h).groups()))
+        ffmpeg_url = f"https://evermeet.cx/pub/ffmpeg/{ver}"
+        ffprobe_url = ffmpeg_url.replace("ffmpeg-", "ffprobe-")
+    else:
+        page = http_get("https://osxexperts.net/", as_text=True)
+        ffs = re.findall(r'href="(https://www\.osxexperts\.net/ffmpeg\d*arm\.zip)"', page, re.I)
+        fps = re.findall(r'href="(https://www\.osxexperts\.net/ffprobe\d*arm\.zip)"', page, re.I)
+        if not ffs or not fps:
+            raise RuntimeError("osxexperts.net 页面解析失败")
+        ffmpeg_url, ffprobe_url = ffs[0], fps[0]
+
+    info = {"ffmpeg_url": ffmpeg_url, "ffprobe_url": ffprobe_url, "arch": arch}
+    m = re.search(r"ffmpeg-(\d+\.\d+\.\d+)\.zip|ffmpeg(\d+)arm", ffmpeg_url)
+    info["ffmpeg_version"] = (m.group(1) or m.group(2)) if m else "unknown"
     if outdir:
-        data = http_get(ffmpeg_url)
-        info["ffmpeg_sha256"] = save(outdir / f"ffmpeg-mac-{arch}.zip", data)
-        with zipfile.ZipFile(outdir / f"ffmpeg-mac-{arch}.zip") as z:
-            z.extractall(outdir / f"ffmpeg-mac-{arch}")
-        # ffprobe lives in a sibling archive on evermeet
-        probe_url = ffmpeg_url.replace("ffmpeg-", "ffprobe-") \
-            if "/ffmpeg-" in ffmpeg_url else None
-        probe_bin = outdir / f"ffmpeg-mac-{arch}" / "ffprobe"
-        if probe_url and not probe_bin.exists():
-            pdata = http_get(probe_url)
-            info["ffprobe_sha256"] = save(outdir / f"ffprobe-mac-{arch}.zip", pdata)
-            with zipfile.ZipFile(outdir / f"ffprobe-mac-{arch}.zip") as z:
-                z.extractall(outdir / f"ffmpeg-mac-{arch}")
-        info["ffmpeg_extracted"] = str((outdir / f"ffmpeg-mac-{arch}").resolve())
+        dest = outdir / f"ffmpeg-mac-{arch}"
+        dest.mkdir(parents=True, exist_ok=True)
+        for name, url in (("ffmpeg", ffmpeg_url), ("ffprobe", ffprobe_url)):
+            data = http_get(url)
+            info[f"{name}_sha256"] = save(outdir / f"{name}-mac-{arch}.zip", data)
+            with zipfile.ZipFile(outdir / f"{name}-mac-{arch}.zip") as z:
+                z.extractall(dest)
+        info["ffmpeg_extracted"] = str(dest.resolve())
     return info
 
 
