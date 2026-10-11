@@ -42,3 +42,4 @@ build-pyinstaller/
 deps/
 *.exe
 !packaging/windows/installer.iss
+*.log
