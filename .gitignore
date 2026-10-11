@@ -33,3 +33,12 @@ bin/
 
 # dev scratch
 .dev-*
+
+# packaging scratch
+stage/
+dist-app/
+build-pyinstaller/
+.deps-cache/
+deps/
+*.exe
+!packaging/windows/installer.iss

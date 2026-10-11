@@ -1,0 +1,234 @@
+name: Weekly Auto-Release
+
+on:
+  schedule:
+    - cron: "0 16 * * 6"   # Beijing Sunday 00:00
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+      lock: ${{ steps.check.outputs.lock }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Resolve latest stable deps (win + mac x64 + mac arm64)
+        run: |
+          mkdir -p deps
+          python tools/fetch_deps.py windows-x64 > deps/windows-x64.json
+          python tools/fetch_deps.py macos-x64    > deps/macos-x64.json
+          python tools/fetch_deps.py macos-arm64  > deps/macos-arm64.json
+
+      - name: Compare with last release lock
+        id: check
+        run: |
+          python - <<'EOF'
+          import json, os, urllib.request
+          tag = "auto-release-lock"
+          api = f"https://api.github.com/repos/${{ github.repository }}/releases/tags/{tag}"
+          req = urllib.request.Request(api, headers={"Authorization": f"token ${{ secrets.GITHUB_TOKEN }}", "User-Agent": "ci"})
+          try:
+              with urllib.request.urlopen(req) as r:
+                  assets = json.load(r).get("assets", [])
+          except Exception:
+              assets = []
+          old = None
+          for a in assets:
+              if a["name"] == "deps-lock-combined.json":
+                  old = json.loads(urllib.request.urlopen(a["browser_download_url"]).read())
+          new = {}
+          for p in ("windows-x64", "macos-x64", "macos-arm64"):
+              new[p] = json.loads(open(f"deps/{p}.json").read())
+          with open("deps/deps-lock-combined.json", "w") as f:
+              json.dump(new, f, indent=2, sort_keys=True)
+          changed = old != new
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"changed={'true' if changed else 'false'}\n")
+          print("changed:", changed)
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deps-lock
+          path: deps/
+
+  build:
+    needs: resolve
+    if: needs.resolve.outputs.changed == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, platform: windows-x64 }
+          - { os: macos-13,      platform: macos-x64 }
+          - { os: macos-14,      platform: macos-arm64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Download platform deps (ffmpeg + libxaac source)
+        shell: bash
+        run: python tools/fetch_deps.py ${{ matrix.platform }} --download deps
+
+      - name: Setup toolchain
+        shell: bash
+        run: |
+          pip install --upgrade pip
+          pip install -e ".[dev]" pyinstaller pyyaml
+          if [ "$RUNNER_OS" = "macOS" ]; then brew install cmake; fi
+
+      - name: Build xaacdec (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          cp -r deps/libxaac-src native/xaacdec/src/libxaac 2>/dev/null || true
+          LIBXAAC_REF=none bash native/xaacdec/build.sh || {
+            rm -rf native/xaacdec/src && bash native/xaacdec/build.sh; }
+          mkdir -p stage-bin
+          cp native/xaacdec/out/bin/xaacdec stage-bin/
+
+      - name: Build xaacdec (Windows, MSYS2 MinGW64)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-gcc-g++ mingw-w64-x86_64-cmake make git
+
+      - name: Build xaacdec (Windows, run)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          cp -r deps/libxaac-src native/xaacdec/src/libxaac 2>/dev/null || true
+          LIBXAAC_REF=none bash native/xaacdec/build.sh || {
+            rm -rf native/xaacdec/src && bash native/xaacdec/build.sh; }
+          mkdir -p stage-bin
+          cp native/xaacdec/out/bin/xaacdec.exe stage-bin/
+
+      - name: Stage ffmpeg
+        shell: bash
+        run: |
+          mkdir -p stage-ffmpeg
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            find deps/ffmpeg-win -name ffmpeg.exe -exec cp {} stage-ffmpeg/ \;
+            find deps/ffmpeg-win -name ffprobe.exe -exec cp {} stage-ffmpeg/ \;
+          else
+            cp deps/ffmpeg-mac-*/ffmpeg deps/ffmpeg-mac-*/ffprobe stage-ffmpeg/ 2>/dev/null || \
+              { cp deps/ffmpeg-mac-*/ffmpeg stage-ffmpeg/; }
+          fi
+          ls -la stage-ffmpeg/
+
+      - name: PyInstaller package
+        shell: bash
+        run: pyinstaller packaging/xhe4bmdc.spec --noconfirm --distpath dist-app --workpath build-pyinstaller
+
+      - name: Assemble Lite
+        shell: bash
+        run: |
+          mkdir -p lite/xHE4BMDC
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            cp -R "dist-app/xHE Converter for BMDC.app" lite/
+          else
+            cp -R dist-app/xHE4BMDC/* lite/xHE4BMDC/
+          fi
+          python -c "from xhe4bmdc import deps; from pathlib import Path; deps.write_example_yaml(Path('lite/dependencies-example.yaml'))"
+          cd lite && zip -rq "../xHE4BMDC-Lite-${{ matrix.platform }}.zip" . && cd ..
+
+      - name: Assemble Onekey installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          New-Item -ItemType Directory -Force packaging/windows/stage/app, packaging/windows/stage/ffmpeg/bin, packaging/windows/stage/bin | Out-Null
+          Copy-Item dist-app/xHE4BMDC/* packaging/windows/stage/app/ -Recurse -Force
+          Copy-Item stage-ffmpeg/* packaging/windows/stage/ffmpeg/bin/
+          Copy-Item stage-bin/xaacdec.exe packaging/windows/stage/bin/
+          Copy-Item LICENSE packaging/windows/ -Force
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" packaging/windows/installer.iss
+          Move-Item packaging/windows/xHE4BMDC-Onekey-Setup.exe "xHE4BMDC-Onekey-${{ matrix.platform }}-Setup.exe"
+
+      - name: Assemble Onekey dmg (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          APP="dist-app/xHE Converter for BMDC.app"
+          mkdir -p "$APP/Contents/Resources/ffmpeg/bin" "$APP/Contents/Resources/bin"
+          cp stage-ffmpeg/ffmpeg stage-ffmpeg/ffprobe "$APP/Contents/Resources/ffmpeg/bin/" 2>/dev/null || cp stage-ffmpeg/ffmpeg "$APP/Contents/Resources/ffmpeg/bin/"
+          cp stage-bin/xaacdec "$APP/Contents/Resources/bin/"
+          chmod +x packaging/macos/make-dmg.sh
+          bash packaging/macos/make-dmg.sh "$APP" "xHE4BMDC-Onekey-${{ matrix.platform }}.dmg" xHE4BMDC
+
+      - name: Write notices
+        shell: bash
+        run: |
+          cat > THIRD_PARTY_NOTICES.md <<'EOF'
+          # Third-party notices
+          - FFmpeg (GPL build, https://ffmpeg.org) — binaries bundled in Onekey; source at https://git.ffmpeg.org/ffmpeg.git (GPL-2.0-or-later)
+          - libxaac / xaacdec (Apache-2.0, AOSP) — https://android.googlesource.com/platform/external/libxaac @ 55de89d2d004016292d1fcb4b42904ad3f5b54a82
+          - Gradio (Apache-2.0), PyInstaller (GPL with bootloader exception)
+          - This program is GPL-3.0; see LICENSE.
+          EOF
+
+      - name: Tests still green
+        run: pytest tests/ -q
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: |
+            xHE4BMDC-Lite-*.zip
+            xHE4BMDC-Onekey-*
+            THIRD_PARTY_NOTICES.md
+
+  release:
+    needs: [resolve, build]
+    if: needs.resolve.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: deps-lock
+          path: release-lock/
+
+      - name: SHA256SUMS
+        run: |
+          cd release
+          sha256sum xHE4BMDC-* | tee SHA256SUMS
+          cp ../release-lock/deps/deps-lock-combined.json .
+
+      - name: Create Auto-Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "Auto-Release-${{ github.run_number }}"
+          name: "Auto-Release ${{ github.run_number }}"
+          body: |
+            自动周构建（依赖有更新）。
+            - Onekey: 内置 FFmpeg 稳定版 + xaacdec + Python 运行时（Windows 安装器 / macOS dmg）
+            - Lite: 自带依赖路径配置（dependencies.yaml）
+            详见 SHA256SUMS 与 deps-lock-combined.json。
+          files: release/*
+          prerelease: false
+
+      - name: Publish lock tag
+        run: |
+          cd release
+          # lock tag asset updated via the same release for next week's comparison
