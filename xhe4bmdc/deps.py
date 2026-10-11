@@ -62,11 +62,18 @@ def _bundled_candidates() -> dict[str, list[Path]]:
     root = program_dir()
     ffdir = root / "ffmpeg" / "bin"
     bindir = root / "bin"
-    return {
-        "ffmpeg": [ffdir / _exe("ffmpeg"), bindir / _exe("ffmpeg"), root / _exe("ffmpeg")],
-        "ffprobe": [ffdir / _exe("ffprobe"), bindir / _exe("ffprobe"), root / _exe("ffprobe")],
-        "xaacdec": [ffdir / _exe("xaacdec"), bindir / _exe("xaacdec"), root / _exe("xaacdec")],
-    }
+    extra: list[Path] = []
+    if sys.platform == "darwin":
+        # macOS .app convention: resources live in Contents/Resources while
+        # the executable sits in Contents/MacOS
+        res = root.parent / "Resources"
+        extra = [res / "ffmpeg" / "bin", res / "bin", res]
+    def cands(name: str) -> list[Path]:
+        out: list[Path] = [ffdir / _exe(name), bindir / _exe(name), root / _exe(name)]
+        for d in extra:
+            out.append(d / _exe(name))
+        return out
+    return {n: cands(n) for n in _TOOLS}
 
 
 def load_yaml_config(path: Path) -> dict:
