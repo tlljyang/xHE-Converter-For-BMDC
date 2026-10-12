@@ -26,15 +26,22 @@ if [ ! -d "$SRC/libxaac" ]; then
 fi
 
 EXTRA_C_FLAGS=""
+EXTRA_CMAKE_FLAGS=""
 # Apple arm64 clang defines __ARM_NEON__, which makes libxaac skip the entire
 # generic QMF/eSBR sources (#if !__ARM_NEON__) and leaves symbols unresolved.
 # Force the portable C path; NEON .s (GNU as syntax) is not used on macOS.
 if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
   EXTRA_C_FLAGS="-U__ARM_NEON__"
 fi
+# Cross-compile Intel x64 on an arm64 host (macos-14 runner):
+#   XAAC_OSX_ARCH=x86_64 ./build.sh
+if [ -n "${XAAC_OSX_ARCH:-}" ]; then
+  EXTRA_CMAKE_FLAGS="-DCMAKE_OSX_ARCHITECTURES=${XAAC_OSX_ARCH}"
+fi
 
 cmake -S "$SRC/libxaac" -B "$OUT/build" -DCMAKE_BUILD_TYPE=Release \
       ${EXTRA_C_FLAGS:+-DCMAKE_C_FLAGS=$EXTRA_C_FLAGS} \
+      $EXTRA_CMAKE_FLAGS \
       -DCMAKE_INSTALL_PREFIX="$OUT" > /dev/null
 cmake --build "$OUT/build" --target xaacdec -j "$JOBS" > /dev/null
 
