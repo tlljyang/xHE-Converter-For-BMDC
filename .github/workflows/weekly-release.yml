@@ -217,7 +217,8 @@ jobs:
         run: |
           cd release
           sha256sum xHE4BMDC-* | tee SHA256SUMS
-          cp ../release-lock/deps/deps-lock-combined.json .
+          cp ../release-lock/deps-lock-combined.json . \
+            || cp ../release-lock/deps/deps-lock-combined.json .
 
       - name: Create Auto-Release
         uses: softprops/action-gh-release@v2
