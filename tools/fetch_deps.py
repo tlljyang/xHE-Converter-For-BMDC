@@ -22,10 +22,22 @@ PROXY = None  # set via env HTTPS_PROXY by CI if needed
 
 
 def http_get(url: str, as_text: bool = False):
-    req = urllib.request.Request(url, headers={"User-Agent": "xHE4BMDC-ci"})
-    with urllib.request.urlopen(req, timeout=120) as r:
-        data = r.read()
-    return data.decode("utf-8", "replace") if as_text else data
+    """GET with retry/backoff for rate limits and transient server errors."""
+    import time
+    last_exc: Exception | None = None
+    for attempt in range(5):
+        req = urllib.request.Request(url, headers={"User-Agent": "xHE4BMDC-ci"})
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r:
+                data = r.read()
+            return data.decode("utf-8", "replace") if as_text else data
+        except urllib.error.HTTPError as exc:
+            last_exc = exc
+            if exc.code in (429, 500, 502, 503, 504) and attempt < 4:
+                time.sleep(5 * (attempt + 1))
+                continue
+            raise
+    raise last_exc  # pragma: no cover
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -73,7 +85,8 @@ def resolve_macos(outdir: Path | None, arch: str) -> dict:
         if not hrefs:
             raise RuntimeError("evermeet.cx 页面解析失败")
         ver = max(hrefs, key=lambda h: tuple(int(x) for x in _STABLE_RE.match(h).groups()))
-        ffmpeg_url = f"https://evermeet.cx/pub/ffmpeg/{ver}"
+        # anchors are relative to /ffmpeg/ (NOT /pub/ffmpeg/)
+        ffmpeg_url = f"https://evermeet.cx/ffmpeg/{ver}"
         ffprobe_url = ffmpeg_url.replace("ffmpeg-", "ffprobe-")
     else:
         page = http_get("https://osxexperts.net/", as_text=True)
@@ -89,7 +102,10 @@ def resolve_macos(outdir: Path | None, arch: str) -> dict:
     if outdir:
         dest = outdir / f"ffmpeg-mac-{arch}"
         dest.mkdir(parents=True, exist_ok=True)
-        for name, url in (("ffmpeg", ffmpeg_url), ("ffprobe", ffprobe_url)):
+        import time as _t
+        for i, (name, url) in enumerate((("ffmpeg", ffmpeg_url), ("ffprobe", ffprobe_url))):
+            if i:
+                _t.sleep(3)  # be gentle with evermeet rate limits
             data = http_get(url)
             info[f"{name}_sha256"] = save(outdir / f"{name}-mac-{arch}.zip", data)
             with zipfile.ZipFile(outdir / f"{name}-mac-{arch}.zip") as z:
