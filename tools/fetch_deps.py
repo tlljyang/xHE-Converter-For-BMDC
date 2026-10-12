@@ -77,35 +77,28 @@ _STABLE_RE = re.compile(r"ffmpeg-(\d+)\.(\d+)\.(\d+)\.zip")
 
 
 def resolve_macos(outdir: Path | None, arch: str) -> dict:
-    """macOS x64: evermeet.cx versioned zips (relative hrefs).
-    macOS arm64: osxexperts.net static zips (ffmpeg<N>arm.zip / ffprobe<N>arm.zip)."""
-    if arch == "x64":
-        page = http_get("https://evermeet.cx/ffmpeg/", as_text=True)
-        hrefs = re.findall(r'href="(ffmpeg-(?:\d+\.)+\d+\.zip)"', page)
-        if not hrefs:
-            raise RuntimeError("evermeet.cx 页面解析失败")
-        ver = max(hrefs, key=lambda h: tuple(int(x) for x in _STABLE_RE.match(h).groups()))
-        # anchors are relative to /ffmpeg/ (NOT /pub/ffmpeg/)
-        ffmpeg_url = f"https://evermeet.cx/ffmpeg/{ver}"
-        ffprobe_url = ffmpeg_url.replace("ffmpeg-", "ffprobe-")
-    else:
-        page = http_get("https://osxexperts.net/", as_text=True)
-        ffs = re.findall(r'href="(https://www\.osxexperts\.net/ffmpeg\d*arm\.zip)"', page, re.I)
-        fps = re.findall(r'href="(https://www\.osxexperts\.net/ffprobe\d*arm\.zip)"', page, re.I)
-        if not ffs or not fps:
-            raise RuntimeError("osxexperts.net 页面解析失败")
-        ffmpeg_url, ffprobe_url = ffs[0], fps[0]
+    """Both macOS arches via osxexperts.net static zips.
+    (evermeet.cx 429-rate-limits GitHub runner IPs, so it is not usable in CI.)
+    x64: ffmpeg<N>intel.zip / ffprobe<N>intel.zip — arm64: ffmpeg<N>arm.zip.
+    """
+    page = http_get("https://osxexperts.net/", as_text=True)
+    suffix = "intel" if arch == "x64" else "arm"
+    ffs = re.findall(rf'href="(https://www\.osxexperts\.net/ffmpeg\d*{suffix}\.zip)"', page, re.I)
+    fps = re.findall(rf'href="(https://www\.osxexperts\.net/ffprobe\d*{suffix}\.zip)"', page, re.I)
+    if not ffs or not fps:
+        raise RuntimeError(f"osxexperts.net 页面解析失败 ({suffix})")
+    ffmpeg_url, ffprobe_url = ffs[0], fps[0]
 
     info = {"ffmpeg_url": ffmpeg_url, "ffprobe_url": ffprobe_url, "arch": arch}
-    m = re.search(r"ffmpeg-(\d+\.\d+\.\d+)\.zip|ffmpeg(\d+)arm", ffmpeg_url)
-    info["ffmpeg_version"] = (m.group(1) or m.group(2)) if m else "unknown"
+    m = re.search(r"ffmpeg(\d+)(?:intel|arm)\.zip", ffmpeg_url, re.I)
+    info["ffmpeg_version"] = m.group(1) if m else "unknown"
     if outdir:
         dest = outdir / f"ffmpeg-mac-{arch}"
         dest.mkdir(parents=True, exist_ok=True)
         import time as _t
         for i, (name, url) in enumerate((("ffmpeg", ffmpeg_url), ("ffprobe", ffprobe_url))):
             if i:
-                _t.sleep(3)  # be gentle with evermeet rate limits
+                _t.sleep(3)  # be gentle with static-host rate limits
             data = http_get(url)
             info[f"{name}_sha256"] = save(outdir / f"{name}-mac-{arch}.zip", data)
             with zipfile.ZipFile(outdir / f"{name}-mac-{arch}.zip") as z:
